@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Service
@@ -31,6 +32,7 @@ public class IndexingServiceImpl implements IndexingService {
     private ForkJoinPool pool;
     private volatile boolean indexingStopped = false;
     private final Map<String, Set<String>> processedUrls = new ConcurrentHashMap<>();
+    private final Map<String, AtomicBoolean> indexingFlags = new ConcurrentHashMap<>();
 
     @Override
     @Transactional
@@ -42,8 +44,9 @@ public class IndexingServiceImpl implements IndexingService {
             }
 
             indexingStopped = false;
-            pool = new ForkJoinPool();
+            pool = new ForkJoinPool(Runtime.getRuntime().availableProcessors());
             processedUrls.clear();
+            indexingFlags.clear();
 
             sites.getSites().forEach(configSite -> {
                 if (indexingStopped) return;
@@ -62,9 +65,15 @@ public class IndexingServiceImpl implements IndexingService {
                 site.setLastError(null);
                 siteRepository.save(site);
 
-                processedUrls.put(site.getUrl(), Collections.synchronizedSet(new HashSet<>()));
+                Set<String> siteProcessedUrls = ConcurrentHashMap.newKeySet();
+                processedUrls.put(site.getUrl(), siteProcessedUrls);
+
+                AtomicBoolean siteIndexingFlag = new AtomicBoolean(false);
+                indexingFlags.put(site.getUrl(), siteIndexingFlag);
+
                 pool.execute(new SiteIndexer(
                         site,
+                        site.getUrl(),
                         siteRepository,
                         pageRepository,
                         lemmaRepository,
@@ -73,7 +82,8 @@ public class IndexingServiceImpl implements IndexingService {
                         config.getUserAgent(),
                         config.getReferrer(),
                         config.getDelay(),
-                        processedUrls.get(site.getUrl())
+                        siteProcessedUrls,
+                        siteIndexingFlag
                 ));
             });
 
@@ -87,34 +97,45 @@ public class IndexingServiceImpl implements IndexingService {
     }
 
     private void monitorIndexing() {
-        pool.shutdown();
         try {
             while (!pool.isTerminated()) {
-                Thread.sleep(1000);
+                updateSiteStatuses();
+                Thread.sleep(5000);
             }
+            updateSiteStatuses();
             log.info("Indexing completed successfully");
         } catch (InterruptedException e) {
-            log.error("Indexing interrupted", e);
+            log.error("Indexing monitoring interrupted", e);
             Thread.currentThread().interrupt();
         } finally {
             pool = null;
             processedUrls.clear();
+            indexingFlags.clear();
         }
     }
 
-    @Transactional
-    protected void clearSiteData(Site site) {
-        if (site.getId() != null) {
-            indexRepository.deleteBySite(site);
-            lemmaRepository.deleteBySite(site);
-            pageRepository.deleteBySite(site);
-        }
+    private void updateSiteStatuses() {
+        sites.getSites().forEach(configSite -> {
+            Site site = siteRepository.findFirstByUrl(configSite.getUrl()).orElse(null);
+            if (site != null && site.getStatus() == Site.Status.INDEXING) {
+                long processedCount = processedUrls.getOrDefault(site.getUrl(), Collections.emptySet()).size();
+
+                if (processedCount > 0) {
+                    site.setStatusTime(LocalDateTime.now());
+                    if (pool.isQuiescent()) {
+                        site.setStatus(Site.Status.INDEXED);
+                    }
+                    siteRepository.save(site);
+                }
+            }
+        });
     }
 
     @Override
     public boolean stopIndexing() {
         if (pool != null) {
             indexingStopped = true;
+            indexingFlags.values().forEach(flag -> flag.set(true));
             pool.shutdownNow();
 
             List<Site> indexingSites = siteRepository.findByStatus(Site.Status.INDEXING);
@@ -125,6 +146,7 @@ public class IndexingServiceImpl implements IndexingService {
             });
 
             processedUrls.clear();
+            indexingFlags.clear();
             return true;
         }
         return false;
@@ -157,6 +179,7 @@ public class IndexingServiceImpl implements IndexingService {
                         newSite.setUrl(configSite.get().getUrl());
                         newSite.setName(configSite.get().getName());
                         newSite.setStatus(Site.Status.INDEXING);
+                        newSite.setStatusTime(LocalDateTime.now());
                         return siteRepository.save(newSite);
                     });
 
@@ -167,6 +190,15 @@ public class IndexingServiceImpl implements IndexingService {
             response.put("result", false);
             response.put("error", "Indexing error: " + e.getMessage());
             return ResponseEntity.internalServerError().body(response);
+        }
+    }
+
+    @Transactional
+    protected void clearSiteData(Site site) {
+        if (site.getId() != null) {
+            indexRepository.deleteBySite(site);
+            lemmaRepository.deleteBySite(site);
+            pageRepository.deleteBySite(site);
         }
     }
 }

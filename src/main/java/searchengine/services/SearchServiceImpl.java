@@ -12,6 +12,7 @@ import searchengine.model.*;
 import searchengine.repository.*;
 
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -185,16 +186,18 @@ public class SearchServiceImpl implements SearchService {
         String cleanText = lemmatizationService.cleanHtml(html);
 
         // Split into sentences
-        String[] sentences = cleanText.split("[.!?]\\s+");
+        String[] sentences = cleanText.split("(?<=[.!?])\\s+");
 
         // Find the best sentence containing most query lemmas
         String bestSentence = null;
         int maxMatches = 0;
 
         for (String sentence : sentences) {
+            String lowerSentence = sentence.toLowerCase();
             int matches = 0;
+
             for (String lemma : queryLemmas) {
-                if (sentence.toLowerCase().contains(lemma.toLowerCase())) {
+                if (lowerSentence.contains(lemma.toLowerCase())) {
                     matches++;
                 }
             }
@@ -203,7 +206,7 @@ public class SearchServiceImpl implements SearchService {
                 maxMatches = matches;
                 bestSentence = sentence;
                 if (matches == queryLemmas.size()) {
-                    break; // Found perfect match
+                    break; // Нашли идеальное совпадение
                 }
             }
         }
@@ -212,10 +215,10 @@ public class SearchServiceImpl implements SearchService {
         String snippet = (bestSentence != null) ? bestSentence :
                 (cleanText.length() > 250 ? cleanText.substring(0, 250) : cleanText);
 
-        // Highlight query words
+        // Выделить ключевые слова
         for (String lemma : queryLemmas) {
             snippet = snippet.replaceAll(
-                    "(?i)\\b(" + lemma + ")\\b",
+                    "(?i)(" + Pattern.quote(lemma) + ")",
                     "<b>$1</b>");
         }
 

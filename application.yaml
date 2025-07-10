@@ -1,3 +1,4 @@
+
 server:
   port: 8080
 
@@ -29,11 +30,14 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
 jsoup:
-  user-agent: "Mozilla/5.0 (compatible; MyBot/1.0)"
+  user-agent: "Mozilla/5.0 (compatible; SearchEngineBot/1.0; +https://example.com/bot)"
   referrer: "https://www.google.com"
-  delay: 1000
+  timeout: 60000 # Увеличенный таймаут (30 секунд)
+  delay: 500
 
 indexing-settings:
+  max-depth: 1000        # Максимальная глубина индексации
+  max-pages-per-site: 10000 # Максимальное количество страниц на сайт
   sites:
     - url: https://www.playback.ru/
       name: playback
@@ -41,6 +45,10 @@ indexing-settings:
       name: gallery
     - url: https://www.svetlovka.ru/
       name: svetlovka
+    - url: https://dimonvideo.ru/
+      name: dom
+    - url: https://dombulgakova.ru/
+      name: bulgakov
 
 management:
   endpoints:

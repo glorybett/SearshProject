@@ -6,7 +6,6 @@ import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
-
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.*;
@@ -15,10 +14,11 @@ import java.util.*;
 public class RussianLemmatizer {
     private final MorfologikAnalyzer analyzer;
 
-    private static final Set<String> STOP_WORDS = Set.of(
+    private static final Set<String> STOP_WORDS = new HashSet<>(Arrays.asList(
             "и", "в", "на", "с", "по", "за", "к", "до", "из", "у", "от", "о", "об",
-            "со", "во", "не", "ни", "да", "но", "или", "ли", "бы", "же", "ведь", "мол"
-    );
+            "со", "во", "не", "ни", "да", "но", "или", "ли", "бы", "же", "ведь", "мол",
+            "под", "при", "то", "это", "как", "так", "что", "вот", "вроде", "типа"
+    ));
 
     public RussianLemmatizer() {
         this.analyzer = new MorfologikAnalyzer();

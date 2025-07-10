@@ -36,19 +36,12 @@ public class PageIndexer {
         String path = url.replaceFirst(baseUrl, "");
         path = path.isEmpty() ? "/" : path;
 
-        // Удаление существующей страницы
-        Optional<Page> existingPage = pageRepository.findByPathAndSite(path, site);
-        existingPage.ifPresent(page -> {
-            indexRepository.deleteByPage(page);
-            lemmaRepository.decrementFrequencyForPage(page);
-            pageRepository.delete(page);
-        });
-
         try {
             Connection.Response response = Jsoup.connect(url)
                     .userAgent("SearchEngineBot")
                     .referrer("https://www.google.com")
-                    .timeout(10_000)
+                    .timeout(30_000)
+                    .ignoreHttpErrors(true)
                     .execute();
 
             if (response.statusCode() >= 400) {
@@ -57,17 +50,31 @@ public class PageIndexer {
             }
 
             Document doc = response.parse();
-            Page page = new Page();
-            page.setSite(site);
-            page.setPath(path);
-            page.setCode(response.statusCode());
-            page.setContent(doc.html());
-            pageRepository.save(page);
-
+            Page page = saveOrUpdatePage(site, path, response.statusCode(), doc.html());
             processContent(page);
         } catch (IOException e) {
             log.error("Error indexing page: {}", url, e);
         }
+    }
+
+    private Page saveOrUpdatePage(Site site, String path, int statusCode, String content) {
+        return pageRepository.findByPathAndSite(path, site)
+                .map(existingPage -> {
+                    indexRepository.deleteByPage(existingPage);
+                    lemmaRepository.decrementFrequencyForPage(existingPage);
+
+                    existingPage.setCode(statusCode);
+                    existingPage.setContent(content);
+                    return pageRepository.save(existingPage);
+                })
+                .orElseGet(() -> {
+                    Page newPage = new Page();
+                    newPage.setSite(site);
+                    newPage.setPath(path);
+                    newPage.setCode(statusCode);
+                    newPage.setContent(content);
+                    return pageRepository.save(newPage);
+                });
     }
 
     @Transactional
